@@ -17,6 +17,10 @@ public class DroneMapUI extends JFrame {
     private JPanel navbar;
     private JPanel legendBar;
 
+    // Buttons as fields so we can enable/disable
+    private NeumorphicButton btnHull, btnTSP, btnMST, btnFly, btnClearResults, btnClearMap;
+    private NeumorphicCircleButton btnTheme, btnInfo;
+
     public DroneMapUI() {
         super("Smart Drone Routing & Geofencing");
         
@@ -50,7 +54,7 @@ public class DroneMapUI extends JFrame {
             boolean isAirborne = msg.contains("Drone airborne");
             if (isAirborne) {
                 pulsingDot.setActive(true);
-                statusBar.setIcon(pulsingDot); // Radiant Yellow Dot
+                statusBar.setIcon(pulsingDot);
                 statusBar.setText("  " + msg);
                 
                 String telemetry = String.format(
@@ -71,12 +75,12 @@ public class DroneMapUI extends JFrame {
                 }
             } else if (msg.contains("Executing Leg") || msg.contains("Navigating: Segment") || msg.contains("Final Approach")) {
                 pulsingDot.setActive(true);
-                statusBar.setIcon(pulsingDot); // Continuous Radiant Yellow
+                statusBar.setIcon(pulsingDot);
                 statusBar.setText("  " + msg);
                 sidebar.addTask("Current Flight Operation", msg);
             } else if (msg.contains("Mission complete") || msg.contains("computed") || msg.contains("established")) {
                 pulsingDot.setActive(false);
-                statusBar.setIcon(pulsingDot); // Radiant Success Dot
+                statusBar.setIcon(pulsingDot);
                 statusBar.setText("  System: " + msg.replace("System: ", ""));
                 sidebar.addTask("Mission Objective", "Successfully neutralized all tasks.");
             } else {
@@ -99,7 +103,7 @@ public class DroneMapUI extends JFrame {
         add(mapPanel, BorderLayout.CENTER);
         
         mapPanel.setSidebar(sidebar);
-        sidebar.setVisible(false); // Hide by default
+        sidebar.setVisible(false);
         sidebar.setOnClose(() -> {
             sidebar.setVisible(false);
             revalidate();
@@ -107,7 +111,11 @@ public class DroneMapUI extends JFrame {
         });
         add(sidebar, BorderLayout.EAST);
 
-        // --- Theme Switcher Logic ---
+        mapPanel.setOverlayVisibilityListener(visible -> SwingUtilities.invokeLater(() -> {
+            setControlsEnabled(!visible);
+        }));
+        setControlsEnabled(!mapPanel.isOverlayVisible());
+
         Theme.addListener(() -> {
             getContentPane().setBackground(Theme.bg);
             statusBar.setBackground(Theme.bg);
@@ -128,12 +136,25 @@ public class DroneMapUI extends JFrame {
         setVisible(true);
     }
 
+    private void setControlsEnabled(boolean enabled) {
+        if (btnHull != null) btnHull.setEnabled(enabled);
+        if (btnTSP != null) btnTSP.setEnabled(enabled);
+        if (btnMST != null) btnMST.setEnabled(enabled);
+        if (btnFly != null) btnFly.setEnabled(enabled);
+        if (btnClearResults != null) btnClearResults.setEnabled(enabled);
+        if (btnClearMap != null) btnClearMap.setEnabled(enabled);
+        if (btnInfo != null) btnInfo.setEnabled(enabled);
+    }
+
+    private boolean canInteract() {
+        return !mapPanel.isOverlayVisible();
+    }
+
     private JPanel buildNavbar() {
         JPanel bar = new JPanel(new BorderLayout());
         bar.setOpaque(false);
         bar.setBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, Theme.border));
 
-        // --- Brand Row (NORTH) ---
         JPanel brandRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 15));
         brandRow.setOpaque(false);
         
@@ -147,7 +168,6 @@ public class DroneMapUI extends JFrame {
         brandRow.add(brandName);
         bar.add(brandRow, BorderLayout.NORTH);
 
-        // --- Action Row (CENTER) ---
         JPanel actionRow = new JPanel(new BorderLayout());
         actionRow.setOpaque(false);
         actionRow.setBorder(BorderFactory.createEmptyBorder(0, 10, 10, 10));
@@ -155,29 +175,29 @@ public class DroneMapUI extends JFrame {
         JPanel leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 12, 5));
         leftPanel.setOpaque(false);
 
-        NeumorphicButton btnHull = new NeumorphicButton("Draw Geofence", new Color(108, 99, 255), Color.WHITE);
-        btnHull.addActionListener(e -> runConvexHull());
+        btnHull = new NeumorphicButton("Draw Geofence", new Color(108, 99, 255), Color.WHITE);
+        btnHull.addActionListener(e -> { if (canInteract()) runConvexHull(); });
         leftPanel.add(btnHull);
 
-        NeumorphicButton btnTSP = new NeumorphicButton("Optimal Route", new Color(255, 120, 100), Color.WHITE);
-        btnTSP.addActionListener(e -> runTSP());
+        btnTSP = new NeumorphicButton("Optimal Route", new Color(255, 120, 100), Color.WHITE);
+        btnTSP.addActionListener(e -> { if (canInteract()) runTSP(); });
         leftPanel.add(btnTSP);
 
-        NeumorphicButton btnMST = new NeumorphicButton("Connect Hubs", new Color(56, 178, 172), Color.WHITE);
-        btnMST.addActionListener(e -> runMST());
+        btnMST = new NeumorphicButton("Connect Hubs", new Color(56, 178, 172), Color.WHITE);
+        btnMST.addActionListener(e -> { if (canInteract()) runMST(); });
         leftPanel.add(btnMST);
 
-        NeumorphicButton btnFly = new NeumorphicButton("Fly Mission", new Color(255, 180, 0), new Color(61, 72, 82));
-        btnFly.addActionListener(e -> mapPanel.startDroneAnimation());
+        btnFly = new NeumorphicButton("Fly Mission", new Color(255, 180, 0), new Color(61, 72, 82));
+        btnFly.addActionListener(e -> { if (canInteract()) mapPanel.startDroneAnimation(); });
         leftPanel.add(btnFly);
 
         leftPanel.add(new JLabel(" "));
         leftPanel.add(new NeumorphicSeparator());
         leftPanel.add(new JLabel(" "));
 
-        // Soft Slate Gray for clearing lines
-        NeumorphicButton btnClearResults = new NeumorphicButton("Clear Overlays", new Color(148, 163, 184), Color.WHITE);
+        btnClearResults = new NeumorphicButton("Clear Overlays", new Color(148, 163, 184), Color.WHITE);
         btnClearResults.addActionListener(e -> {
+            if (!canInteract()) return;
             mapPanel.clearHull();
             mapPanel.clearTSP();
             mapPanel.clearMST();
@@ -188,9 +208,9 @@ public class DroneMapUI extends JFrame {
         });
         leftPanel.add(btnClearResults);
 
-        // Soft Crimson Red for deleting all coordinates
-        NeumorphicButton btnClearMap = new NeumorphicButton("Reset Map", new Color(239, 68, 68), Color.WHITE);
+        btnClearMap = new NeumorphicButton("Reset Map", new Color(239, 68, 68), Color.WHITE);
         btnClearMap.addActionListener(e -> {
+            if (!canInteract()) return;
             int res = JOptionPane.showConfirmDialog(this,
                 "Erase all coordinates?", "Wipe Map", JOptionPane.YES_NO_OPTION);
             if (res == JOptionPane.YES_OPTION) {
@@ -208,16 +228,14 @@ public class DroneMapUI extends JFrame {
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT, 15, 5));
         rightPanel.setOpaque(false);
 
-        // --- Now using the custom Vector Icon for the theme toggle ---
-        NeumorphicCircleButton btnTheme = new NeumorphicCircleButton(new ThemeToggleIcon());
+        btnTheme = new NeumorphicCircleButton(new ThemeToggleIcon());
         btnTheme.setToolTipText("Toggle Dark Mode");
         btnTheme.addActionListener(e -> Theme.toggle());
         rightPanel.add(btnTheme);
 
-        // Circular 'i' Info Button
-        NeumorphicCircleButton btnInfo = new NeumorphicCircleButton("i");
+        btnInfo = new NeumorphicCircleButton("i");
         btnInfo.setToolTipText("System Info");
-        btnInfo.addActionListener(e -> mapPanel.showIntroOverlay());
+        btnInfo.addActionListener(e -> { if (canInteract()) mapPanel.showIntroOverlay(); });
         rightPanel.add(btnInfo);
         
         actionRow.add(rightPanel, BorderLayout.EAST);
@@ -225,7 +243,7 @@ public class DroneMapUI extends JFrame {
 
         return bar;
     }
-
+    
     private JPanel buildLegendBar() {
         JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 20, 8));
         bar.setOpaque(false);
@@ -475,6 +493,13 @@ class NeumorphicButton extends JButton {
 
     public NeumorphicButton(String text) {
         this(text, null, null);
+    }
+
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        setForeground(fgColor != null ? fgColor : Theme.text);
+        repaint();
     }
 
     @Override
