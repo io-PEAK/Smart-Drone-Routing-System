@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <defs>
+    <linearGradient id="grad" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#6C63FF"/>
+      <stop offset="100%" stop-color="#4299E1"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded gradient background -->
+  <circle cx="60" cy="60" r="55" fill="url(#grad)"/>
+
+  <!-- Graph edges -->
+  <g stroke="rgba(255,255,255,0.75)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <line x1="60" y1="28" x2="92" y2="60"/>
+    <line x1="92" y1="60" x2="60" y2="92"/>
+    <line x1="60" y1="92" x2="28" y2="60"/>
+    <line x1="28" y1="60" x2="60" y2="28"/>
+  </g>
+
+  <!-- Outer nodes -->
+  <circle cx="60" cy="28" r="10" fill="#FFFFFF"/>
+  <circle cx="92" cy="60" r="10" fill="#FFFFFF"/>
+  <circle cx="60" cy="92" r="10" fill="#FFFFFF"/>
+  <circle cx="28" cy="60" r="10" fill="#FFFFFF"/>
+
+  <!-- Center payload -->
+  <circle cx="60" cy="60" r="12" fill="#FFDF00"/>
+</svg>
