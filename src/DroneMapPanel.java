@@ -7,7 +7,7 @@ import java.awt.geom.AffineTransform;
 
 public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionListener, MouseWheelListener, KeyListener {
 
-    public enum AlgoType { HULL, TSP, MST }
+    public enum AlgoType { HULL, TSP, MST, ALERT, DRONE }
 
     // Map Navigation State
     private double zoomLevel = 1.0;
@@ -28,8 +28,19 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
     private boolean showWelcomeOverlay = true;
     private int scrollY = 0;
     private int maxScrollY = 0;
-    private Rectangle closeButtonRect = new Rectangle();
     private Rectangle popupCloseRect = new Rectangle();
+    private Rectangle rectContinue = new Rectangle();
+    private boolean continuePressed = false;
+
+    // Overlay visibility callback
+    public interface OverlayVisibilityListener { void onOverlayVisibilityChanged(boolean visible); }
+    private OverlayVisibilityListener overlayVisibilityListener;
+
+    public void setOverlayVisibilityListener(OverlayVisibilityListener l) { this.overlayVisibilityListener = l; }
+    public boolean isOverlayVisible() { return showWelcomeOverlay; }
+    private void notifyOverlayVisible(boolean visible) {
+        if (overlayVisibilityListener != null) overlayVisibilityListener.onOverlayVisibilityChanged(visible);
+    }
     
     // Accordion State
     private boolean showDetails = false;
@@ -77,6 +88,14 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
     private Rectangle rectSelTSP = new Rectangle();
     private Rectangle rectSelMST = new Rectangle();
     private Rectangle rectSelHull = new Rectangle();
+    private boolean pressSelTSP = false;
+    private boolean pressSelMST = false;
+    private boolean pressSelHull = false;
+
+    private boolean canFlyTSP = false;
+private boolean canFlyMST = false;
+private boolean canFlyHull = false;
+
     private String    activeTrajectory = "";
     private AlgorithmSidebar sidebar;
     private float     missionAlpha = 0f;
@@ -138,6 +157,9 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         showDetails = false;
         scrollY = 0;
         expandHull = expandTSP = expandMST = false;
+        showMissionSelector = false;
+        missionAlpha = 0f;
+        notifyOverlayVisible(true);
         repaint();
     }
 
@@ -151,7 +173,6 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         offsetX = 0;
         offsetY = 0;
         
-        // Ensure sidebar completely vanishes on reset
         if (sidebar != null) {
             sidebar.clear();
             sidebar.setVisible(false);
@@ -190,10 +211,16 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
     public void clearMST()  { showMST  = false; mstEdges.clear();   repaint(); }
 
     public void startDroneAnimation() {
-        int activeCount = 0;
-        if (showTSP && tspRoute.size() >= 2) activeCount++;
-        if (showMST && !mstEdges.isEmpty()) activeCount++;
-        if (showHull && hullPoints.size() >= 3) activeCount++;
+        if (showWelcomeOverlay) return; // disable when info overlay is open
+
+        canFlyTSP  = showTSP && tspRoute.size() >= 2;
+canFlyMST  = showMST && !mstEdges.isEmpty();
+canFlyHull = showHull && hullPoints.size() >= 3;
+
+int activeCount = 0;
+if (canFlyTSP) activeCount++;
+if (canFlyMST) activeCount++;
+if (canFlyHull) activeCount++;
 
         if (activeCount > 1) {
             showMissionSelector = true;
@@ -206,7 +233,14 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         if (showTSP && tspRoute.size() >= 2) executeFlyMission("TSP");
         else if (showMST && !mstEdges.isEmpty()) executeFlyMission("MST");
         else if (showHull && hullPoints.size() >= 3) executeFlyMission("HULL");
-        else postStatus("No flight plan found. Run an algorithm first.");
+        else {
+    postStatus("⚠️ Mission launch blocked: no active route found. Run Geofence, Optimal Route, or Connect Hubs first.");
+    showExplanation(
+    AlgoType.ALERT,
+    "Mission Launch Blocked",
+    "No executable flight trajectory is currently available. Please run at least one planning algorithm (Geofence, Optimal Route, or Connect Hubs) before initiating Fly Mission."
+);
+}
     }
 
     private void executeFlyMission(String type) {
@@ -225,6 +259,21 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
             path.add(path.get(0));
             missionName = "Geofence Perimeter Sweep";
         }
+
+        String explain = "";
+if (type.equals("TSP")) {
+    explain = "Flight initialized on the Optimal Route (TSP) trajectory for minimum total travel distance.";
+} else if (type.equals("MST")) {
+    explain = "Flight initialized on the Network Backbone (MST) patrol trajectory for resilient coverage.";
+} else if (type.equals("HULL")) {
+    explain = "Flight initialized on the Geofence (Convex Hull) perimeter sweep trajectory.";
+}
+
+showExplanation(
+    AlgoType.DRONE,
+    "Drone Mission Activated",
+    explain
+);
 
         if (path.isEmpty()) return;
 
@@ -348,19 +397,22 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         drawMinimap(g2);
         drawPopup(g2);
 
+        drawSearchIcon(g2);
+        if (showSearchUI) drawSearchInputBox(g2);
+
+        if (showMissionSelector && !showWelcomeOverlay) {
+            drawMissionSelector(g2);
+        }
+
         if (showWelcomeOverlay) {
             drawWelcomeOverlay(g2);
         }
-
-        drawSearchIcon(g2);
-        if (showSearchUI) drawSearchInputBox(g2);
-        if (showMissionSelector) drawMissionSelector(g2);
 
         if (hoveredLocation != null) {
             drawHoverTooltip(g2);
         }
     }
-
+    
     private void drawMinimap(Graphics2D g2) {
         if (minimapAlpha <= 0) return;
         
@@ -595,7 +647,7 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
 
         int cw = Math.min(800, getWidth() - 60);
         
-        int ch = 350; 
+        int ch = 400; 
         if (cw < 600) ch += 60; 
         if (showDetails) {
             ch += 110; 
@@ -694,21 +746,61 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
             rectMST = new Rectangle();
         }
 
-        int closeSize = 36;
-        int closeBtnX = cx + cw - closeSize - 20;
-        int closeBtnY = cy + 20;
-        
-        g2.setColor(Theme.shadLight); g2.fillRoundRect(closeBtnX-1, closeBtnY-1, closeSize, closeSize, 12, 12);
-        g2.setColor(Theme.shadDark);  g2.fillRoundRect(closeBtnX+2, closeBtnY+2, closeSize, closeSize, 12, 12);
-        g2.setColor(Theme.bg);
-        g2.fillRoundRect(closeBtnX, closeBtnY, closeSize, closeSize, 12, 12);
+        // --- Continue Button (thin, text-fit, neumorphic) ---
+       String continueText = "Continue";
+g2.setFont(new Font("SansSerif", Font.BOLD, 13));
+FontMetrics cfm = g2.getFontMetrics();
 
-        g2.setColor(Theme.textMuted);
-        g2.setStroke(new BasicStroke(2.5f));
-        g2.drawLine(closeBtnX + 10, closeBtnY + 10, closeBtnX + 26, closeBtnY + 26);
-        g2.drawLine(closeBtnX + 26, closeBtnY + 10, closeBtnX + 10, closeBtnY + 26);
+int contW = cfm.stringWidth(continueText) + 48;
+int contH = 30;
+int contX = cx + (cw - contW) / 2;
+int contY = cy + ch - 50;
+int contR = contH;
 
-        closeButtonRect = new Rectangle(closeBtnX, closeBtnY, closeSize, closeSize);
+
+if (!continuePressed) {
+    for (int i = 0; i < 3; i++) {
+        g2.setColor(Theme.shadLight);
+        g2.fillRoundRect(contX - i - 2, contY - i - 2, contW, contH, contR, contR);
+    }
+    for (int i = 0; i < 4; i++) {
+        g2.setColor(Theme.shadDark);
+        g2.fillRoundRect(contX + i + 1, contY + i + 1, contW, contH, contR, contR);
+    }
+}
+
+// Button body
+g2.setColor(new Color(108, 99, 255));
+g2.fillRoundRect(contX, contY, contW, contH, contR, contR);
+
+// Pressed state
+if (continuePressed) {
+    Shape inner = new java.awt.geom.RoundRectangle2D.Float(contX, contY, contW, contH, contR, contR);
+    Shape oldClip = g2.getClip();
+    g2.setClip(inner);
+
+    g2.setColor(Theme.shadDark);
+    g2.setStroke(new BasicStroke(3f));
+    g2.drawRoundRect(contX + 1, contY + 1, contW, contH, contR, contR);
+
+    g2.setColor(Theme.shadLight);
+    g2.drawRoundRect(contX - 2, contY - 2, contW, contH, contR, contR);
+
+    g2.setClip(oldClip);
+    g2.translate(1, 1);
+}
+
+// Text
+g2.setColor(Color.WHITE);
+g2.drawString(continueText,
+        contX + (contW - cfm.stringWidth(continueText)) / 2,
+        contY + 20);
+
+if (continuePressed) {
+    g2.translate(-1, -1);
+}
+
+rectContinue = new Rectangle(contX, contY, contW, contH);
     }
 
     private int drawAccordion(Graphics2D g2, String title, String body, boolean expanded, int x, int y, int width) {
@@ -834,9 +926,35 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
             g2.fillOval(x+6, y, 5, 5);
             g2.fillOval(x, y+12, 5, 5);
             g2.fillOval(x+14, y+8, 5, 5);
-        }
+        } else if (type == AlgoType.ALERT) {
+    g2.setColor(new Color(255, 120, 100)); 
+    g2.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+    int[] tx = {x+9, x+17, x+1};
+    int[] ty = {y+1, y+15, y+15};
+    g2.drawPolygon(tx, ty, 3);
+    g2.drawLine(x+9, y+6, x+9, y+11); 
+    g2.fillOval(x+8, y+13, 2, 2);    
+} else if (type == AlgoType.DRONE) {
+    g2.setColor(new Color(255, 180, 0));
+    g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+    // X frame
+    g2.drawLine(x+2, y+2, x+16, y+16);
+    g2.drawLine(x+16, y+2, x+2, y+16);
+
+    // rotors
+    g2.drawOval(x, y, 5, 5);
+    g2.drawOval(x+13, y, 5, 5);
+    g2.drawOval(x, y+13, 5, 5);
+    g2.drawOval(x+13, y+13, 5, 5);
+
+    // core
+    g2.setColor(new Color(108, 99, 255));
+    g2.fillOval(x+6, y+6, 6, 6);
+}
     }
 
+    
     @Override public void mouseClicked(MouseEvent e) {
         Point p = e.getPoint();
         
@@ -847,8 +965,9 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         }
 
         if (showWelcomeOverlay) {
-            if (closeButtonRect.contains(p)) {
+            if (rectContinue.contains(p)) {
                 showWelcomeOverlay = false;
+                notifyOverlayVisible(false);
                 repaint();
             } else if (rectDetails.contains(p)) {
                 showDetails = !showDetails;
@@ -964,7 +1083,7 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         boolean overUI = false;
         
         if (showWelcomeOverlay) {
-            if (closeButtonRect.contains(p) || rectDetails.contains(p) || rectHull.contains(p) || rectTSP.contains(p) || rectMST.contains(p)) {
+            if (rectDetails.contains(p) || rectHull.contains(p) || rectTSP.contains(p) || rectMST.contains(p) || rectContinue.contains(p)) {
                 setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 overUI = true;
             } else {
@@ -1006,47 +1125,77 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         }
     }
 
-    @Override public void mouseWheelMoved(MouseWheelEvent e) {
+   @Override public void mouseWheelMoved(MouseWheelEvent e) {
+    if (showWelcomeOverlay || showMissionSelector) {
         if (showWelcomeOverlay) {
             scrollY += e.getWheelRotation() * 30;
             if (scrollY < 0) scrollY = 0;
             if (scrollY > maxScrollY) scrollY = maxScrollY;
             repaint();
-            return;
         }
-        
-        wakeMinimap();
-        double oldZoom = zoomLevel;
-        double factor = Math.pow(1.15, -e.getPreciseWheelRotation());
-        zoomLevel *= factor;
-        zoomLevel = Math.max(0.1, Math.min(zoomLevel, 10.0));
-        
-        double pX = e.getX();
-        double pY = e.getY();
-        offsetX = pX - (pX - offsetX) * (zoomLevel / oldZoom);
-        offsetY = pY - (pY - offsetY) * (zoomLevel / oldZoom);
-        
-        repaint();
-    }
-
-    @Override public void mousePressed(MouseEvent e) {
-        lastMousePos = e.getPoint();
-    }
-
-    @Override public void mouseDragged(MouseEvent e) {
-        if (showWelcomeOverlay) return;
-        
-        if (SwingUtilities.isLeftMouseButton(e)) {
-            wakeMinimap();
-            Point p = e.getPoint();
-            offsetX += (p.x - lastMousePos.x);
-            offsetY += (p.y - lastMousePos.y);
-            lastMousePos = p;
-            repaint();
-        }
+        return;
     }
     
-    @Override public void mouseReleased(MouseEvent e) {}
+    wakeMinimap();
+    double oldZoom = zoomLevel;
+    double factor = Math.pow(1.15, -e.getPreciseWheelRotation());
+    zoomLevel *= factor;
+    zoomLevel = Math.max(0.1, Math.min(zoomLevel, 10.0));
+    
+    double pX = e.getX();
+    double pY = e.getY();
+    offsetX = pX - (pX - offsetX) * (zoomLevel / oldZoom);
+    offsetY = pY - (pY - offsetY) * (zoomLevel / oldZoom);
+    
+    repaint();
+}
+
+    @Override public void mousePressed(MouseEvent e) {
+    lastMousePos = e.getPoint();
+
+    if (showMissionSelector) {
+        Point p = e.getPoint();
+        pressSelHull = rectSelHull.contains(p);
+        pressSelTSP  = rectSelTSP.contains(p);
+        pressSelMST  = rectSelMST.contains(p);
+        repaint();
+        return;
+    }
+
+    if (showWelcomeOverlay && rectContinue.contains(e.getPoint())) {
+        continuePressed = true;
+        repaint();
+    }
+}
+
+    @Override public void mouseDragged(MouseEvent e) {
+    if (showWelcomeOverlay || showMissionSelector) return;
+    
+    if (SwingUtilities.isLeftMouseButton(e)) {
+        wakeMinimap();
+        Point p = e.getPoint();
+        offsetX += (p.x - lastMousePos.x);
+        offsetY += (p.y - lastMousePos.y);
+        lastMousePos = p;
+        repaint();
+    }
+}
+    
+    @Override public void mouseReleased(MouseEvent e) {
+    if (showMissionSelector) {
+        pressSelHull = false;
+        pressSelTSP = false;
+        pressSelMST = false;
+        repaint();
+        return;
+    }
+
+    if (continuePressed) {
+        continuePressed = false;
+        repaint();
+    }
+}
+
     @Override public void mouseEntered(MouseEvent e)  {}
     @Override public void mouseExited(MouseEvent e)   {
         hoveredLocation = null;
@@ -1205,68 +1354,95 @@ public class DroneMapPanel extends JPanel implements MouseListener, MouseMotionL
         }
     }
 
-    private void drawMissionSelector(Graphics2D g2) {
-        if (missionAlpha <= 0f) return;
-        
-        Composite oldComp = g2.getComposite();
-        float dimIntensity = Theme.isDark ? 0.75f : 0.45f;
-        float safeDimAlpha = Math.max(0f, Math.min(1f, missionAlpha * dimIntensity));
-        g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, safeDimAlpha));
-        g2.setColor(Theme.isDark ? Color.BLACK : new Color(15, 23, 42)); 
-        g2.fillRect(0, 0, getWidth(), getHeight());
-        
-        float safeBtnAlpha = Math.max(0f, Math.min(1f, missionAlpha));
-        g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, safeBtnAlpha));
-        int slideY = (int)((1.0f - missionAlpha) * 20); 
-        
-        int btnW = 140;
-        int btnH = 30; 
-        int gap = 20;
-        int totalW = (btnW * 3) + (gap * 2);
-        int sx = (getWidth() - totalW) / 2;
-        int sy = (getHeight() - btnH) / 2 + slideY;
+private void drawMissionSelector(Graphics2D g2) {
+    if (missionAlpha <= 0f) return;
+    
+    Composite oldComp = g2.getComposite();
+    float dimIntensity = Theme.isDark ? 0.75f : 0.45f;
+    float safeDimAlpha = Math.max(0f, Math.min(1f, missionAlpha * dimIntensity));
+    g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, safeDimAlpha));
+    g2.setColor(Theme.isDark ? Color.BLACK : new Color(15, 23, 42)); 
+    g2.fillRect(0, 0, getWidth(), getHeight());
+    
+    float safeBtnAlpha = Math.max(0f, Math.min(1f, missionAlpha));
+    g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, safeBtnAlpha));
+    int slideY = (int)((1.0f - missionAlpha) * 20); 
+    
+    java.util.List<String> opts = new java.util.ArrayList<>();
+if (canFlyHull) opts.add("HULL");
+if (canFlyTSP)  opts.add("TSP");
+if (canFlyMST)  opts.add("MST");
 
-        rectSelHull = new Rectangle(sx, sy, btnW, btnH);
-        drawSelOption(g2, rectSelHull, "Geofence Scan", COL_HULL, showHull);
-        
-        rectSelTSP = new Rectangle(sx + btnW + gap, sy, btnW, btnH);
-        drawSelOption(g2, rectSelTSP, "Optimal Path", COL_TSP, showTSP);
-        
-        rectSelMST = new Rectangle(sx + (btnW + gap) * 2, sy, btnW, btnH);
-        drawSelOption(g2, rectSelMST, "Backbone Connect", COL_MST, showMST);
-        
-        g2.setComposite(oldComp);
-    }
+int n = opts.size();
+if (n == 0) return;
 
-    private void drawSelOption(Graphics2D g2, Rectangle r, String text, Color col, boolean active) {
-        int x = r.x, y = r.y, w = r.width, h = r.height;
-        int radius = h; 
-        
-        if (!active) {
-            g2.setColor(Theme.bg);
-            g2.fillRoundRect(x, y, w, h, radius, radius);
-            g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-            g2.setColor(Theme.textMuted);
-            g2.drawString(text, x + (w - g2.getFontMetrics().stringWidth(text))/2, y + 20);
-            return;
-        }
-        
-        for (int i=0; i<3; i++) {
-            g2.setColor(Theme.shadLight);
-            g2.fillRoundRect(x - i - 2, y - i - 2, w, h, radius, radius);
-        }
-        for (int i=0; i<4; i++) {
-            g2.setColor(Theme.shadDark);
-            g2.fillRoundRect(x + i + 1, y + i + 1, w, h, radius, radius);
-        }
-        
-        g2.setColor(col);
-        g2.fillRoundRect(x, y, w, h, radius, radius);
-        
-        g2.setFont(new Font("SansSerif", Font.BOLD, 12));
-        g2.setColor(Color.WHITE);
-        g2.drawString(text, x + (w - g2.getFontMetrics().stringWidth(text))/2, y + 20);
+int btnW = 220;
+int btnH = 30;
+int gap = 20;
+int totalW = n * btnW + (n - 1) * gap;
+int sx = (getWidth() - totalW) / 2;
+int sy = (getHeight() - btnH) / 2 + slideY;
+
+rectSelHull = new Rectangle();
+rectSelTSP = new Rectangle();
+rectSelMST = new Rectangle();
+
+for (int i = 0; i < n; i++) {
+    int x = sx + i * (btnW + gap);
+    String opt = opts.get(i);
+
+    if (opt.equals("HULL")) {
+        rectSelHull = new Rectangle(x, sy, btnW, btnH);
+        drawSelOption(g2, rectSelHull, "Geofence Scan", COL_HULL, pressSelHull);
+    } else if (opt.equals("TSP")) {
+        rectSelTSP = new Rectangle(x, sy, btnW, btnH);
+        drawSelOption(g2, rectSelTSP, "Optimal Path", COL_TSP, pressSelTSP);
+    } else {
+        rectSelMST = new Rectangle(x, sy, btnW, btnH);
+        drawSelOption(g2, rectSelMST, "Backbone Connect", COL_MST, pressSelMST);
     }
+}
+    
+    g2.setComposite(oldComp);
+}
+
+private void drawSelOption(Graphics2D g2, Rectangle r, String text, Color col, boolean pressed) {
+    int x = r.x, y = r.y, w = r.width, h = r.height;
+    int radius = h; 
+    
+    if (!pressed) {
+        for (int i = 0; i < 4; i++) {
+    g2.setColor(Theme.shadDark);
+    g2.fillRoundRect(x + i + 1, y + i + 1, w, h, radius, radius);
+}
+
+    }
+    
+    g2.setColor(col);
+    g2.fillRoundRect(x, y, w, h, radius, radius);
+
+    if (pressed) {
+        Shape inner = new java.awt.geom.RoundRectangle2D.Float(x, y, w, h, radius, radius);
+        Shape oldClip = g2.getClip();
+        g2.setClip(inner);
+
+        g2.setColor(Theme.shadDark);
+        g2.setStroke(new BasicStroke(3f));
+        g2.drawRoundRect(x+1, y+1, w, h, radius, radius);
+
+        g2.setColor(Theme.shadLight);
+        g2.drawRoundRect(x-2, y-2, w, h, radius, radius);
+
+        g2.setClip(oldClip);
+        g2.translate(1, 1);
+    }
+    
+    g2.setFont(new Font("SansSerif", Font.BOLD, 12));
+    g2.setColor(Color.WHITE);
+    g2.drawString(text, x + (w - g2.getFontMetrics().stringWidth(text))/2, y + 20);
+
+    if (pressed) g2.translate(-1, -1);
+}
 
     private void updateSidebarForMission(String type) {
         if (sidebar != null) {
